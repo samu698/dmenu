@@ -56,3 +56,8 @@ int drw_text(Drw *drw, int x, int y, unsigned int w, unsigned int h, unsigned in
 
 /* Map functions */
 void drw_map(Drw *drw, Window win, int x, int y, unsigned int w, unsigned int h);
+
+/* Image abstraction */
+Pixmap drw_load_img(Drw *drw, unsigned int w, unsigned int h, unsigned char *img);
+void drw_copy_img(Drw *drw, Pixmap img, int x, int y, unsigned int w, unsigned int h);
+void drw_free_img(Drw *drw, Pixmap img);

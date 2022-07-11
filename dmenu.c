@@ -8,6 +8,7 @@
 #include <strings.h>
 #include <time.h>
 #include <unistd.h>
+#include <stdint.h>
 
 #include <X11/Xlib.h>
 #include <X11/Xatom.h>
@@ -19,6 +20,9 @@
 
 #include "drw.h"
 #include "util.h"
+
+#define IMGSIDE 16
+#define IMGSIZE	(IMGSIDE * IMGSIDE * 4)
 
 /* macros */
 #define INTERSECT(x,y,w,h,r)  (MAX(0, MIN((x)+(w),(r).x_org+(r).width)  - MAX((x),(r).x_org)) \
@@ -33,10 +37,17 @@ enum { SchemeNorm, SchemeSel, SchemeNormHighlight, SchemeSelHighlight,
        SchemeOut, SchemeLast }; /* color schemes */
 
 
+typedef union {
+	uint32_t pixel;
+	struct { unsigned char r, g, b, a; } rgba;
+	struct { unsigned char b, g, r, a; } bgra;
+} pixel;
+
 struct item {
 	char *text;
 	struct item *left, *right;
 	int out;
+	Pixmap img;
 	double distance;
 };
 
@@ -188,7 +199,7 @@ drawhighlights(struct item *item, int x, int y, int maxw)
 static int
 drawitem(struct item *item, int x, int y, int w)
 {
-	int r;
+	int r, off = icon ? IMGSIDE : 0;
 	if (item == sel)
 		drw_setscheme(drw, scheme[SchemeSel]);
 	else if (item->out)
@@ -196,8 +207,9 @@ drawitem(struct item *item, int x, int y, int w)
 	else
 		drw_setscheme(drw, scheme[SchemeNorm]);
 
-	r = drw_text(drw, x, y, w, bh, lrpad / 2, item->text, 0);
-	drawhighlights(item, x, y, w);
+	if (item->img != None) drw_copy_img(drw, item->img, x, y, IMGSIDE, IMGSIDE);
+	r = drw_text(drw, x + off, y, w, bh, lrpad / 2, item->text, 0);
+	drawhighlights(item, x + off, y, w);
 	return r;
 }
 
@@ -707,10 +719,52 @@ paste(void)
 	drawmenu();
 }
 
+
+static void
+unescape(const unsigned char *esc, unsigned char *unesc)
+{
+	char c;
+	int i, j = 0, inesc = 0;
+
+	for (i = 0; i < strlen((char*)esc) && j < IMGSIZE; i++) {
+		c = esc[i];
+		if (!inesc) {
+			if (c == '\\') inesc = 1;
+			else unesc[j++] = c;
+		} else {
+			inesc = 0;
+			if (c == 'n') unesc[j++] = '\n';
+			else if (c == '0') unesc[j++] = '\0';
+			else {
+				unesc[j++] = '\\';
+				if (c != '\\') unesc[j++] = c;
+			}
+		}
+	}
+}
+
+static void
+blendimg(const unsigned char *in, Clr *scm, unsigned char *out) {
+	pixel bg;
+	const pixel* inp = (const pixel*)in;
+	pixel* outp = (pixel*)out;
+	int a, inva;
+	bg.pixel = scm[ColBg].pixel;
+	for (int i = 0; i < IMGSIDE * IMGSIDE; i++) {
+		a = inp[i].rgba.a + 1;
+		inva = 257 - a;
+		outp[i].bgra.r = (a * inp[i].rgba.r + inva * bg.rgba.r) >> 8;
+		outp[i].bgra.g = (a * inp[i].rgba.g + inva * bg.rgba.g) >> 8;
+		outp[i].bgra.b = (a * inp[i].rgba.b + inva * bg.rgba.b) >> 8;
+		outp[i].bgra.a = 0xFF;
+	}
+}
+
 static void
 readstdin(void)
 {
-	char buf[sizeof text], *p;
+	char buf[sizeof text], *p, *imgptr;
+	unsigned char img[IMGSIZE], composite[IMGSIZE];
 	size_t i, size = 0;
 
 	/* read each line from stdin and add it to the item list */
@@ -723,6 +777,17 @@ readstdin(void)
 		if (!(items[i].text = strdup(buf)))
 			die("cannot strdup %zu bytes:", strlen(buf) + 1);
 		items[i].out = 0;
+		if (icon) {
+			items[i].img = None;
+			imgptr = buf + strlen(buf) + 1;
+			if (imgptr - 1 == p)
+				continue;
+			if ((p = strchr(imgptr, '\n')))
+				*p = '\0';
+			unescape((unsigned char*)imgptr, img);
+			blendimg(img, scheme[SchemeNorm], composite);
+			items[i].img = drw_load_img(drw, IMGSIDE, IMGSIDE, composite);
+		}
 	}
 	if (items)
 		items[i].text = NULL;
@@ -784,8 +849,6 @@ setup(void)
 	int a, di, n, area = 0;
 #endif
 	/* init appearance */
-	for (j = 0; j < SchemeLast; j++)
-		scheme[j] = drw_scm_create(drw, colors[j], 2);
 
 	clip = XInternAtom(dpy, "CLIPBOARD",   False);
 	utf8 = XInternAtom(dpy, "UTF8_STRING", False);
@@ -902,7 +965,7 @@ int
 main(int argc, char *argv[])
 {
 	XWindowAttributes wa;
-	int i, fast = 0;
+	int i, j, fast = 0;
 
 	for (i = 1; i < argc; i++)
 		/* these options take no arguments */
@@ -920,7 +983,9 @@ main(int argc, char *argv[])
 		else if (!strcmp(argv[i], "-i")) { /* case-insensitive item matching */
 			fstrncmp = strncasecmp;
 			fstrstr = cistrstr;
-		} else if (i + 1 == argc)
+		} else if (!strcmp(argv[i], "-I")) /* enables/disables icons */
+			icon = !icon;
+		else if (i + 1 == argc)
 			usage();
 		/* these options take one argument */
 		else if (!strcmp(argv[i], "-l"))   /* number of lines in vertical list */
@@ -972,6 +1037,9 @@ main(int argc, char *argv[])
 	if (pledge("stdio rpath", NULL) == -1)
 		die("pledge");
 #endif
+
+	for (j = 0; j < SchemeLast; j++)
+		scheme[j] = drw_scm_create(drw, colors[j], 2);
 
 	if (fast && !isatty(0)) {
 		grabkeyboard();

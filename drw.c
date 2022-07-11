@@ -460,3 +460,22 @@ drw_cur_free(Drw *drw, Cur *cursor)
 	XFreeCursor(drw->dpy, cursor->cursor);
 	free(cursor);
 }
+
+Pixmap
+drw_load_img(Drw *drw, unsigned int w, unsigned int h, unsigned char *img) {
+	XImage *ximg = XCreateImage(drw->dpy, XDefaultVisual(drw->dpy, drw->screen), 24, ZPixmap, 0, (char*)img, w, h, 8, 0);
+	Pixmap out = XCreatePixmap(drw->dpy, drw->drawable, w, h, 24);
+	XPutImage(drw->dpy, out, drw->gc, ximg, 0, 0, 0, 0, w, h);
+	XFree(ximg);
+	return out;
+}
+
+void
+drw_copy_img(Drw *drw, Pixmap img, int x, int y, unsigned int w, unsigned int h) {
+	XCopyArea(drw->dpy, img, drw->drawable, drw->gc, 0, 0, w, h, x, y);
+}
+
+void
+drw_free_img(Drw *drw, Pixmap img) {
+	XFreePixmap(drw->dpy, img);
+}
