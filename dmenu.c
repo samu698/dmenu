@@ -498,9 +498,10 @@ static void
 keypress(XKeyEvent *ev)
 {
 	char buf[32];
-	int len;
+	int len, i = 0;
 	KeySym ksym;
 	Status status;
+	struct item *it = items;
 
 	len = XmbLookupString(xic, ev, buf, sizeof buf, &ksym, &status);
 	switch (status) {
@@ -663,6 +664,13 @@ insert:
 		break;
 	case XK_Return:
 	case XK_KP_Enter:
+		if (printnum) {
+			if (!sel) break;
+			while (it++ != sel) ++i;
+			printf("%d\n", i);
+			cleanup();	
+			exit(0);
+		}
 		puts((sel && !(ev->state & ShiftMask)) ? sel->text : text);
 		if (!(ev->state & ControlMask)) {
 			cleanup();
@@ -985,6 +993,8 @@ main(int argc, char *argv[])
 			fstrstr = cistrstr;
 		} else if (!strcmp(argv[i], "-I")) /* enables/disables icons */
 			icon = !icon;
+		else if (!strcmp(argv[i], "-n")) /* enables/disables entry number output */
+			printnum = !printnum;
 		else if (i + 1 == argc)
 			usage();
 		/* these options take one argument */
