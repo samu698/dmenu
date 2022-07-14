@@ -160,18 +160,21 @@ cistrstr(const char *h, const char *n)
 static void
 drawhighlights(struct item *item, int x, int y, int maxw)
 {
-	int i, indent;
+	int i, indent, checkcase;
 	char *highlight;
-	char c;
+	char c, a, b;
 
 	if (!(strlen(item->text) && strlen(text)))
 		return;
 
+	checkcase = fstrstr == strstr;
 	drw_setscheme(drw, scheme[item == sel
 	                   ? SchemeSelHighlight
 	                   : SchemeNormHighlight]);
 	for (i = 0, highlight = item->text; *highlight && text[i];) {
-		if (*highlight == text[i]) {
+		a = checkcase ? *highlight : tolower(*highlight);
+		b = checkcase ? text[i] : tolower(text[i]);
+		if (a == b) {
 			/* get indentation */
 			c = *highlight;
 			*highlight = '\0';
